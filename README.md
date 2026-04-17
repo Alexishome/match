@@ -1,44 +1,64 @@
 # RegLens openFDA Matcher
 
-This repository contains a first-pass matching module for the RegLens course project.
+This repository contains a matching module for the RegLens course project.
 
-The current default is intentionally strict:
-- prediction entity defaults to `product`
-- product matching uses structured `openfda.product_ndc`
-- free-text product fallback is disabled by default
+The main script is:
+- `reglens_entity_matcher.py`
 
-That default is useful for validation because it shows how far strict product/NDC matching can realistically go before adding looser heuristics.
+Its job is to align local openFDA FAERS and enforcement data onto a shared entity key so the next teammate can build time-window features and future recall labels without re-parsing the raw JSON.
 
-## What the module does
+## Current default
 
-`reglens_entity_matcher.py` reads local FAERS and enforcement files, normalizes them onto a shared entity key, and writes outputs that are ready for downstream feature engineering.
-
-Outputs are split into three layers:
-- `faers_entity_events/`: standardized FAERS rows keyed by entity
-- `enforcement_entity_events/`: standardized recall rows keyed by entity
-- `summaries/`: entity registry and overlap summaries
-
-## Supported inputs
-
-The script is designed for local files that have already been downloaded from openFDA.
-
-Supported formats:
-- FAERS: `jsonl`, `ndjson`, or bulk `json`
-- Enforcement: bulk `json`, `jsonl`, or `ndjson`
-
-The bulk openFDA format is the one with top-level `meta` and `results`.
-
-## Default matching behavior
-
-Default command-line behavior:
+The default matching behavior is intentionally strict:
 - `--entity-level product`
-- strict `product_ndc` matching
-- no free-text product fallback
+- structured `openfda.product_ndc` matching
+- no free-text product fallback by default
 
-Interpretation by mode:
-- `product`: one `product_ndc` becomes one `entity_key`
-- `application`: one application number becomes one `entity_key`
-- `ingredient`: one substance/generic name becomes one `entity_key`
+This is the right default for validating how far product/NDC matching can realistically go before introducing looser heuristics.
+
+## What the script writes
+
+For an output directory like `out_dir`, the script writes:
+- `out_dir/faers_entity_events/`
+- `out_dir/enforcement_entity_events/`
+- `out_dir/summaries/entity_registry_product.*`
+- `out_dir/summaries/matched_entities_product.*`
+- `out_dir/summaries/faers_universe_product.*`
+- `out_dir/summaries/run_summary_product.json`
+
+The output is designed as a feature-engineering-ready intermediate layer, not a final model table.
+
+## Entity levels supported
+
+- `product`
+- `application`
+- `ingredient`
+
+Default is `product`.
+
+## Why this version is richer
+
+This script keeps more low-level fields than a minimal matcher so the feature-engineering teammate has more flexibility later.
+
+### FAERS fields retained
+
+Examples of retained FAERS fields:
+- report identifiers and timing: `safetyreportid`, `companynumb`, `report_receiptdate`, `receivedate`, `transmissiondate`
+- seriousness and patient context: `serious`, `seriousnessdeath`, `patientsex`, `patientonsetage`, `patientonsetageunit`, `patient_death_date`
+- reaction summary: `reaction_count`, `reaction_terms`
+- report-source metadata: `primarysource_qualification`, `primarysource_country`, `sender_type`, `sender_organization`, `receiver_type`
+- drug-level context: `drugcharacterization`, `medicinalproduct`, `drugindication`, `drugadministrationroute`, `drugauthorizationnumb`
+- harmonized identifiers: `openfda_product_ndc`, `openfda_package_ndc`, `openfda_application_number`, `openfda_brand_name`, `openfda_generic_name`, `openfda_substance_name`, `openfda_manufacturer_name`, `openfda_route`, `openfda_product_type`, `openfda_rxcui`, `openfda_spl_set_id`, `openfda_spl_id`, `openfda_unii`
+
+### Enforcement fields retained
+
+Examples of retained enforcement fields:
+- recall identifiers and timing: `event_id`, `recall_number`, `recall_initiation_date`, `center_classification_date`, `termination_date`, `report_date`
+- recall severity and status: `classification`, `status`, `voluntary_mandated`, `initial_firm_notification`
+- logistics and scope hints: `product_quantity`, `code_info`, `distribution_pattern`, `reason_for_recall`
+- firm and geography: `recalling_firm`, `address_1`, `address_2`, `city`, `state`, `postal_code`, `country`
+- product text: `product_description`, `product_type`
+- harmonized identifiers: `openfda_product_ndc`, `openfda_package_ndc`, `openfda_application_number`, `openfda_brand_name`, `openfda_generic_name`, `openfda_substance_name`, `openfda_manufacturer_name`, `openfda_route`, `openfda_product_type`, `openfda_rxcui`, `openfda_spl_set_id`, `openfda_spl_id`, `openfda_unii`
 
 ## Usage
 
@@ -51,7 +71,7 @@ python3 reglens_entity_matcher.py \
   --output-dir /path/to/output_dir
 ```
 
-### Product matching with suspect drugs only
+### Suspect-only FAERS
 
 ```bash
 python3 reglens_entity_matcher.py \
@@ -61,9 +81,9 @@ python3 reglens_entity_matcher.py \
   --suspect-only
 ```
 
-### Product matching with text fallback
+### Product mode with text fallback
 
-This increases coverage but also noise.
+This increases coverage and noise.
 
 ```bash
 python3 reglens_entity_matcher.py \
@@ -83,46 +103,14 @@ python3 reglens_entity_matcher.py \
   --entity-level ingredient
 ```
 
-## Output files
+## Validation on the existing local sample
 
-For `--output-dir out_dir` and `--entity-level product`, the script writes:
+The current committed sample result was regenerated after expanding the retained field set.
 
-- `out_dir/faers_entity_events/faers_product_part-*.parquet`
-- `out_dir/enforcement_entity_events/enforcement_product_part-*.parquet`
-- `out_dir/summaries/entity_registry_product.parquet`
-- `out_dir/summaries/matched_entities_product.parquet`
-- `out_dir/summaries/faers_universe_product.parquet`
-- `out_dir/summaries/run_summary_product.json`
-
-### Entity registry columns
-
-Main registry fields:
-- `entity_key`
-- `entity_name`
-- `entity_match_basis`
-- `in_faers`
-- `in_enforcement`
-- `matched_in_both`
-- `faers_event_rows`
-- `faers_report_count`
-- `serious_event_rows`
-- `death_event_rows`
-- `first_faers_date`
-- `last_faers_date`
-- `enforcement_event_rows`
-- `first_recall_date`
-- `last_recall_date`
-- `recall_class_i_count`
-- `recall_class_ii_count`
-- `recall_class_iii_count`
-
-These are intentionally kept at the entity-summary level so a downstream pipeline can build time-window features from the event tables.
-
-## Validation on local sample data
-
-This repo was validated on the existing local sample data that had already been downloaded during exploratory work:
-- 2,000 FAERS reports from `drug_event`
-- 2,000 enforcement records from `drug_enforcement`
+Validation data:
+- 2,000 FAERS reports
+- 2,000 enforcement records
+- strict product/NDC mode
 
 Validation command:
 
@@ -137,9 +125,9 @@ python3 reglens_entity_matcher.py \
 ```
 
 Key sample result:
-- strict product/NDC mode matched `249` entity keys across the two sampled sources
-
-This number is only a validation sample result, not a full-data estimate.
+- matched shared entity keys: `249`
+- matched FAERS entity-event rows: `1118`
+- matched enforcement entity-event rows: `501`
 
 Committed example artifacts:
 - `examples/validation_sample_results.md`
@@ -147,11 +135,13 @@ Committed example artifacts:
 - `examples/faers_event_sample.csv`
 - `examples/enforcement_event_sample.csv`
 
+The event-level sample CSVs now show richer retained fields, not just the minimal matching columns.
+
 ## Important caveats
 
 - FAERS is a report dataset, not a clean product master table.
 - A single FAERS drug row can expand to many `product_ndc` values.
-- Strict product/NDC mode may greatly increase FAERS entity-event rows because one record can fan out to multiple NDC keys.
-- Enforcement rows often lack structured harmonized fields, so strict matching can still be sparse.
+- Strict product/NDC mode can greatly inflate FAERS entity-event rows.
+- Enforcement rows often lack harmonized identifiers, so strict overlap can stay sparse even when the pipeline works technically.
 
-This repository is meant to produce a feature-engineering-ready intermediate layer, not a final modeling dataset by itself.
+This repository is meant to create a feature-engineering-ready intermediate layer, not the final modeling dataset itself.

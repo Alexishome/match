@@ -342,6 +342,7 @@ class ChunkWriter:
         df = pd.DataFrame(self.buffer)
         suffix = ".parquet" if self.output_format == "parquet" else ".csv"
         path = self.output_dir / f"{self.stem}_part-{self.part:05d}{suffix}"
+        path.parent.mkdir(parents=True, exist_ok=True)
         if self.output_format == "parquet":
             df.to_parquet(path, index=False)
         else:
@@ -377,6 +378,17 @@ def build_event_rows(
     patient = record.get("patient", {}) or {}
     drugs = patient.get("drug", []) or []
     report_date = parse_yyyymmdd(record.get("receiptdate"))
+    received_date = parse_yyyymmdd(record.get("receivedate"))
+    transmission_date = parse_yyyymmdd(record.get("transmissiondate"))
+    primarysource = record.get("primarysource", {}) or {}
+    sender = record.get("sender", {}) or {}
+    receiver = record.get("receiver", {}) or {}
+    reactions = patient.get("reaction", []) or []
+    reaction_terms = [
+        reaction.get("reactionmeddrapt")
+        for reaction in reactions
+        if isinstance(reaction, dict) and reaction.get("reactionmeddrapt")
+    ]
 
     for drug_index, drug in enumerate(drugs):
         drug_characterization = str(drug.get("drugcharacterization") or "").strip()
@@ -456,11 +468,28 @@ def build_event_rows(
                 "entity_match_basis": match_basis,
                 "source": "faers",
                 "safetyreportid": record.get("safetyreportid"),
+                "companynumb": record.get("companynumb"),
+                "fulfillexpeditecriteria": record.get("fulfillexpeditecriteria"),
                 "drug_index": drug_index,
                 "report_receiptdate": record.get("receiptdate"),
                 "report_receiptdate_parsed": report_date,
+                "receivedate": record.get("receivedate"),
+                "receivedate_parsed": received_date,
+                "transmissiondate": record.get("transmissiondate"),
+                "transmissiondate_parsed": transmission_date,
                 "serious": record.get("serious"),
                 "seriousnessdeath": record.get("seriousnessdeath"),
+                "patient_death_date": join_list((patient.get("patientdeath") or {}).get("patientdeathdate")),
+                "patientsex": patient.get("patientsex"),
+                "patientonsetage": patient.get("patientonsetage"),
+                "patientonsetageunit": patient.get("patientonsetageunit"),
+                "reaction_count": len(reaction_terms),
+                "reaction_terms": join_list(reaction_terms),
+                "primarysource_qualification": primarysource.get("qualification"),
+                "primarysource_country": primarysource.get("reportercountry"),
+                "sender_type": sender.get("sendertype"),
+                "sender_organization": sender.get("senderorganization"),
+                "receiver_type": receiver.get("receivertype"),
                 "drugcharacterization": drug_characterization,
                 "medicinalproduct": drug.get("medicinalproduct"),
                 "drugindication": drug.get("drugindication"),
@@ -472,6 +501,13 @@ def build_event_rows(
                 "openfda_generic_name": join_list(generic_names),
                 "openfda_substance_name": join_list(substance_names),
                 "openfda_manufacturer_name": join_list(openfda.get("manufacturer_name")),
+                "openfda_product_type": join_list(openfda.get("product_type")),
+                "openfda_route": join_list(openfda.get("route")),
+                "openfda_package_ndc": join_list(openfda.get("package_ndc")),
+                "openfda_rxcui": join_list(openfda.get("rxcui")),
+                "openfda_spl_set_id": join_list(openfda.get("spl_set_id")),
+                "openfda_spl_id": join_list(openfda.get("spl_id")),
+                "openfda_unii": join_list(openfda.get("unii")),
                 "candidate_application_display": application_display,
                 "candidate_ingredient_display": ingredient_display,
             }
@@ -493,6 +529,7 @@ def build_enforcement_rows(
         join_list(generic_names),
     )
     product_ndc_display = join_list(product_ndcs)
+    package_ndc_display = join_list(openfda.get("package_ndc"))
     product_text_display = record.get("product_description")
     candidates: list[tuple[str | None, str | None, str | None]] = []
 
@@ -551,6 +588,7 @@ def build_enforcement_rows(
                 "event_id": record.get("event_id"),
                 "status": record.get("status"),
                 "classification": record.get("classification"),
+                "product_type": record.get("product_type"),
                 "recall_number": record.get("recall_number"),
                 "recall_initiation_date": record.get("recall_initiation_date"),
                 "recall_initiation_date_parsed": recall_initiation_date,
@@ -558,15 +596,35 @@ def build_enforcement_rows(
                 "center_classification_date_parsed": center_classification_date,
                 "termination_date": record.get("termination_date"),
                 "termination_date_parsed": termination_date,
+                "report_date": record.get("report_date"),
+                "report_date_parsed": parse_yyyymmdd(record.get("report_date")),
+                "voluntary_mandated": record.get("voluntary_mandated"),
+                "initial_firm_notification": record.get("initial_firm_notification"),
                 "product_description": record.get("product_description"),
+                "product_quantity": record.get("product_quantity"),
+                "code_info": record.get("code_info"),
+                "distribution_pattern": record.get("distribution_pattern"),
                 "reason_for_recall": record.get("reason_for_recall"),
                 "recalling_firm": record.get("recalling_firm"),
+                "address_1": record.get("address_1"),
+                "address_2": record.get("address_2"),
+                "city": record.get("city"),
+                "state": record.get("state"),
+                "postal_code": record.get("postal_code"),
+                "country": record.get("country"),
                 "openfda_application_number": application_display,
                 "openfda_product_ndc": product_ndc_display,
+                "openfda_package_ndc": package_ndc_display,
                 "openfda_brand_name": join_list(openfda.get("brand_name")),
                 "openfda_generic_name": join_list(generic_names),
                 "openfda_substance_name": join_list(substance_names),
                 "openfda_manufacturer_name": join_list(openfda.get("manufacturer_name")),
+                "openfda_product_type": join_list(openfda.get("product_type")),
+                "openfda_route": join_list(openfda.get("route")),
+                "openfda_rxcui": join_list(openfda.get("rxcui")),
+                "openfda_spl_set_id": join_list(openfda.get("spl_set_id")),
+                "openfda_spl_id": join_list(openfda.get("spl_id")),
+                "openfda_unii": join_list(openfda.get("unii")),
                 "candidate_ingredient_display": ingredient_display,
             }
         )
